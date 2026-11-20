@@ -1,0 +1,39 @@
+#!/bin/bash
+#PBS -N simulation
+#PBS -l nodes=1:ppn=8
+#PBS -l mem=36gb
+#PBS -l walltime=24:00:00
+#PBS -j oe
+#PBS -q cn1
+#PBS -V
+
+OUTDIR="/PATH/TO/pbmc.mt/SNP/logs"
+mkdir -p "$OUTDIR"
+
+LOGFILE="${OUTDIR}/${SPECIES}.pbs.log"
+
+echo "===== Job started =====" > "$LOGFILE"
+echo "Time: $(date)" >> "$LOGFILE"
+echo "Node: $(hostname)" >> "$LOGFILE"
+echo "Working directory: $(pwd)" >> "$LOGFILE"
+echo "SPECIES: ${SPECIES}" >> "$LOGFILE"
+echo >> "$LOGFILE"
+
+cd /PATH/TO/pbmc.mt/SNP/ || { echo "❗ cd directory failed" >> "$LOGFILE"; exit 1; }
+
+if [[ -z "${SPECIES}" ]]; then
+  echo "❗ Error: SPECIES environment variable is empty" >> "$LOGFILE"
+  exit 1
+fi
+
+SCRIPT="/PATH/TO/pbmc.mt/SNP/batch.simulation.sh"
+if [[ ! -f "$SCRIPT" ]]; then
+  echo "❗ Error: Cannot find $SCRIPT" >> "$LOGFILE"
+  exit 1
+fi
+
+echo "===== Running $SCRIPT ${SPECIES} =====" >> "$LOGFILE"
+bash "$SCRIPT" "${SPECIES}" >> "$LOGFILE" 2>&1
+
+echo "===== Job finished =====" >> "$LOGFILE"
+

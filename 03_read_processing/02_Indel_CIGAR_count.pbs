@@ -1,0 +1,80 @@
+#!/bin/bash
+#PBS -N Indel_CIGAR_Count
+#PBS -j oe
+#PBS -q batch
+#PBS -o Indel_CIGAR_Count.out
+#PBS -e Indel_CIGAR_Count.err
+#PBS -l nodes=1:ppn=1
+
+SPECIES=(
+    #"mouse"
+    "human"
+    "rat"
+    "chicken"
+    "cobra"
+    "sturgeon"
+    "stingray"
+)
+
+process_species() {
+    local species=$1
+    
+    local work_dir="/PATH/TO/pbmc.mt/SNP/$species/mgatk.CleanBam/bam"
+    cd "$work_dir" || exit
+    
+    local log_file="$work_dir/02_Indel_CIGAR_count.log"
+    echo "===== $(date) ===== Start processing $species =====" > "$log_file"
+    echo "Working directory: $work_dir" >> "$log_file"
+    
+    local bam_file="possorted_bam.chrM.MAPQ40.rmdup.filtered.bam"
+    if [ ! -f "$bam_file" ]; then
+        echo "ERROR: Input BAM file not found: $bam_file" | tee -a "$log_file"
+        return 1
+    fi
+    
+    echo "Counting insertions and deletions from CIGAR strings..." | tee -a "$log_file"
+    
+    samtools view "$bam_file" 2>> "$log_file" | \
+    awk 'BEGIN {ins=0; del=0} 
+    {
+      if($6 ~ /I/) ins += gsub(/[0-9]+I/, "") 
+      if($6 ~ /D/) del += gsub(/[0-9]+D/, "")
+    } END {
+      print "===== CIGAR STATISTICS ====="
+      print "Total Insertions:", ins
+      print "Total Deletions:", del
+      print "Total Indel Events:", ins + del
+      print "============================"
+    }' | tee "Indel_CIGAR_count.txt" >> "$log_file"
+    
+    if [ ! -f "Indel_CIGAR_count.txt" ]; then
+        echo "ERROR: Failed to create output file" | tee -a "$log_file"
+        return 1
+    fi
+    
+    echo "CIGAR statistics saved to: $work_dir/Indel_CIGAR_count.txt" | tee -a "$log_file"
+    cat "Indel_CIGAR_count.txt" >> "$log_file"
+    
+    echo "===== $(date) ===== Finished processing $species =====" | tee -a "$log_file"
+    
+    return 0
+}
+
+for species in "${SPECIES[@]}"; do
+    start_time=$(date +%s)
+    echo "Starting processing for $species at $(date)"
+    
+    process_species "$species"
+    result=$?
+    
+    end_time=$(date +%s)
+    runtime=$((end_time - start_time))
+    
+    if [ $result -eq 0 ]; then
+        echo "Successfully processed $species in $runtime seconds"
+    else
+        echo "Failed to process $species after $runtime seconds. Check log: /PATH/TO/pbmc.mt/SNP/$species/mgatk.new/bam/02_Indel_CIGAR_count.log"
+    fi
+done
+
+echo "All species processed!"

@@ -1,0 +1,114 @@
+#!/bin/bash
+#PBS -N chrM_Extract
+#PBS -j oe
+#PBS -q batch
+#PBS -o chrM_Extract.out
+#PBS -e chrM_Extract.err
+#PBS -l nodes=1:ppn=24
+
+THREADS=16
+
+SPECIES=(
+    "human"
+    #"mouse"
+    "rat"
+    "chicken"
+    "cobra"
+    "sturgeon"
+    "stingray"
+)
+
+SPECIES_DIRS=(
+    "/PATH/TO/pbmc.mt/SNP/human/cellranger/Human_mt_mask/outs"
+    #"/PATH/TO/pbmc.mt/SNP/mouse/cellranger/mt.mask/C57_mouse/outs"
+    "/PATH/TO/pbmc.mt/SNP/rat/cellranger/Rat_mt_mask/outs"
+    "/PATH/TO/pbmc.mt/SNP/chicken/cellranger/Chicken_mt_mask/outs"
+    "/PATH/TO/pbmc.mt/SNP/cobra/cellranger/Naba_atraMT_mt_mask/outs"
+    "/PATH/TO/pbmc.mt/SNP/sturgeon/cellranger/Sturgeon_mt_mask/outs"
+    "/PATH/TO/pbmc.mt/SNP/stingray/cellranger/mt.mask/Stingray/outs"
+)
+
+calculate_cigar_length() {
+    awk '
+        BEGIN {OFS="\t"}
+        /^@/ {print; next}
+        {
+            total = 0
+            cig = $6
+            while (match(cig, /([0-9]+)([MIDNSHP=X])/, arr)) {
+                len = arr[1]
+                op = arr[2]
+                if (op ~ /[M=XDN]/) total += len
+                cig = substr(cig, RSTART + RLENGTH)
+            }
+            if (total >= 40) print
+        }'
+}
+
+process_species() {
+    local species=$1
+    local species_dir=$2
+    
+    local out_dir="/PATH/TO/pbmc.mt/SNP/$species/mgatk.CleanBam/bam"
+    mkdir -p "$out_dir"
+    cd "$out_dir" || exit
+    
+    local log_file="$out_dir/processing.log"
+    echo "===== $(date) ===== Start processing $species =====" > "$log_file"
+    echo "Input directory: $species_dir" >> "$log_file"
+    echo "Output directory: $out_dir" >> "$log_file"
+    
+    ln -sf "$species_dir/possorted_bam.bam" ./possorted_bam.bam
+    ln -sf "$species_dir/possorted_bam.bam.bai" ./possorted_bam.bam.bai
+    echo "Created symlinks to BAM files: possorted_bam.bam and possorted_bam.bam.bai" >> "$log_file"
+    
+    local mito_name="MT"
+    if [[ "$species" == "human" ]]; then
+        mito_name="chrM"
+    fi
+    echo "Using mitochondrial name: $mito_name" >> "$log_file"
+    
+    echo "Step 1: Extracting $mito_name reads..." >> "$log_file"
+    samtools view -@ $THREADS -h -b possorted_bam.bam "$mito_name" > possorted_bam.chrM.bam 2>> "$log_file"
+    samtools flagstat possorted_bam.chrM.bam > 0_possorted_bam.chrM.flagstat.txt 2>> "$log_file"
+    echo "Step 1 completed. Flagstat saved." >> "$log_file"
+    
+    echo "Step 2-4: Quality filtering, deduplication and length filtering..." >> "$log_file"
+    {
+        samtools view -@ $THREADS -h -b -q 40 -f 2 -F 3852 possorted_bam.chrM.bam |
+        samtools view -@ $THREADS -h |
+        calculate_cigar_length |
+        samtools view -@ $THREADS -b -o possorted_bam.chrM.MAPQ40.rmdup.filtered.bam
+    } 2>> "$log_file"
+    
+    samtools flagstat possorted_bam.chrM.MAPQ40.rmdup.filtered.bam > 1_possorted_bam.chrM.MAPQ40.rmdup.filtered.flagstat.txt 2>> "$log_file"
+    echo "Filtering steps completed. Flagstat saved." >> "$log_file"
+
+    echo "Indexing final BAM file..." >> "$log_file"
+    samtools index -@ $THREADS possorted_bam.chrM.MAPQ40.rmdup.filtered.bam 2>> "$log_file"
+    
+    rm -f possorted_bam.bam possorted_bam.bam.bai
+    echo "Removed temporary symlinks: possorted_bam.bam and possorted_bam.bam.bai" >> "$log_file"
+    
+    echo "===== $(date) ===== Finished $species processing =====" >> "$log_file"
+    
+    echo "Finished $species. Results and log saved to $out_dir"
+}
+
+for i in "${!SPECIES[@]}"; do
+    species="${SPECIES[$i]}"
+    species_dir="${SPECIES_DIRS[$i]}"
+    
+    echo "Starting processing for $species..."
+    
+    start_time=$(date +%s)
+    process_species "$species" "$species_dir"
+    end_time=$(date +%s)
+    runtime=$((end_time - start_time))
+    
+    echo "Completed $species in $runtime seconds"
+done
+
+echo "All species processed! Total time: $SECONDS seconds"
+
+

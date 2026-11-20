@@ -1,0 +1,91 @@
+#!/bin/bash
+
+#PBS -N cleanBam_human
+#PBS -j oe
+#PBS -q batch
+#PBS -o cleanBam_human.out
+#PBS -e cleanBam_human.err
+#PBS -l nodes=1:ppn=24
+
+THREADS=16
+
+SAMPLES=(
+    "PBMC_1"
+    "PBMC_2"
+    "CD34_1"
+    "CD34_2"
+)
+
+OUTS_DIRS=(
+    "/PATH/TO/pbmc.mt/SNP/human/cellranger/PBMC_1/PBMC_1/outs"
+    "/PATH/TO/pbmc.mt/SNP/human/cellranger/PBMC_2/PBMC_2/outs"
+    "/PATH/TO/pbmc.mt/SNP/human/cellranger/CD34_1/CD34_1/outs"
+    "/PATH/TO/pbmc.mt/SNP/human/cellranger/CD34_2/CD34_2/outs"
+)
+
+BASE_OUT="/PATH/TO/pbmc.mt/SNP/human/clean_bam/"
+mkdir -p "$BASE_OUT"
+
+calculate_cigar_length() {
+    awk '
+        BEGIN {OFS="\t"}
+        /^@/ {print; next}
+        {
+            total = 0
+            cig = $6
+            while (match(cig, /([0-9]+)([MIDNSHP=X])/, arr)) {
+                len = arr[1]
+                op = arr[2]
+                if (op ~ /[M=XDN]/) total += len
+                cig = substr(cig, RSTART + RLENGTH)
+            }
+            if (total >= 40) print
+        }'
+}
+
+process_sample() {
+    local sample=$1
+    local src_dir=$2
+
+    echo "==== Start processing $sample ===="
+
+    local out_dir="$BASE_OUT/$sample"
+    mkdir -p "$out_dir"
+    cd "$out_dir" || exit
+
+    local log="$out_dir/processing.log"
+    echo "Start $sample at $(date)" > "$log"
+    echo "Input outs: $src_dir" >> "$log"
+
+    ln -sf "$src_dir/possorted_bam.bam" possorted_bam.bam
+    ln -sf "$src_dir/possorted_bam.bam.bai" possorted_bam.bam.bai
+
+    echo "Linked possorted_bam.bam" >> "$log"
+
+    mito="chrM"
+
+    echo "Extracting $mito ..." >> "$log"
+    samtools view -@ $THREADS -h -b possorted_bam.bam "$mito" > possorted_bam.chrM.bam
+    samtools flagstat possorted_bam.chrM.bam > 0_possorted_bam.chrM.flagstat.txt
+
+    echo "Filtering..." >> "$log"
+    samtools view -@ $THREADS -h -b -q 40 -f 2 -F 3852 possorted_bam.chrM.bam \
+        | samtools view -@ $THREADS -h \
+        | calculate_cigar_length \
+        | samtools view -@ $THREADS -b -o possorted_bam.chrM.MAPQ40.rmdup.filtered.bam
+
+    samtools flagstat possorted_bam.chrM.MAPQ40.rmdup.filtered.bam \
+        > 1_possorted_bam.chrM.MAPQ40.rmdup.filtered.flagstat.txt
+
+    samtools index possorted_bam.chrM.MAPQ40.rmdup.filtered.bam
+
+    echo "Done $sample at $(date)" >> "$log"
+    echo "==== Finished $sample ===="
+}
+
+for i in "${!SAMPLES[@]}"; do
+    process_sample "${SAMPLES[$i]}" "${OUTS_DIRS[$i]}"
+done
+
+echo "All samples finished."
+

@@ -1,0 +1,113 @@
+#!/bin/bash
+#PBS -N IndelRealigner
+#PBS -j oe
+#PBS -q batch
+#PBS -o /PATH/TO/pbmc.mt/SNP/IndelRealigner.out
+#PBS -e /PATH/TO/pbmc.mt/SNP/IndelRealigner.err
+#PBS -l nodes=1:ppn=32
+
+SPECIES=(
+    #"mouse"
+    "human"
+    "rat"
+    "chicken"
+    "cobra"
+    "sturgeon"
+    "stingray"
+)
+
+REF_GENOMES=(
+    #"/PATH/TO/pbmc.mt/ref/mouse/new/genome.mask/Mus_musculus_toplevel/fasta/genome.fa"
+    "/PATH/TO/pbmc.mt/ref/human/mt.mask/Homo_Shapien_GRCh38/fasta/genome.fa"
+    "/PATH/TO/pbmc.mt/ref/rat/mt.mask/mRatBN7_mtMask_toplevel/fasta/genome.fa"
+    "/PATH/TO/pbmc.mt/ref/chicken/ensembl/mt.mask/bGalGal1_mtMask_toplevel/fasta/genome.fa"
+    "/PATH/TO/pbmc.mt/ref/cobra/Naja_atra/mt.mask/Nana_atraMT_toplevel_mt/fasta/genome.fa"
+    "/PATH/TO/pbmc.mt/ref/XunFish/NCBI.mt/mt.mask/Acipenser_sinensis_toplevel_mt/fasta/genome.fa"
+    "/PATH/TO/pbmc.mt/ref/HongFish/NCBI.mt/new/genome.mask/Potamotrygon_leopoldi_toplevel_mtMask/fasta/genome.fa"
+)
+
+process_species() {
+    local species=$1
+    local ref_genome=$2
+    
+    local work_dir="/PATH/TO/pbmc.mt/SNP/$species/mgatk.CleanBam/bam"
+    cd "$work_dir" || exit
+    
+    local log_file="$work_dir/02_IndelRealigner.log"
+    echo "===== $(date) ===== Start processing $species =====" > "$log_file"
+    echo "Working directory: $work_dir" >> "$log_file"
+    echo "Reference genome: $ref_genome" >> "$log_file"
+    
+    echo "Step 1: Running RealignerTargetCreator..." | tee -a "$log_file"
+    java -Xmx8g -jar /PATH/TO/tools/GenomeAnalysisTK_3.5-0.jar \
+         -R "$ref_genome" \
+         -T RealignerTargetCreator \
+         -nt 32 \
+         -I possorted_bam.chrM.MAPQ40.rmdup.filtered.bam \
+         -o possorted_bam.chrM.MAPQ40.rmdup.filtered.target.intervals >> "$log_file" 2>&1
+    
+    if [ ! -f "possorted_bam.chrM.MAPQ40.rmdup.filtered.target.intervals" ]; then
+        echo "ERROR: Failed to create target intervals for $species" | tee -a "$log_file"
+        return 1
+    fi
+    echo "Step 1 completed: $(date)" | tee -a "$log_file"
+    
+    echo "Step 2: Running IndelRealigner..." | tee -a "$log_file"
+    java -Xmx64g -jar /PATH/TO/tools/GenomeAnalysisTK_3.5-0.jar \
+         -R "$ref_genome" \
+         -T IndelRealigner \
+         -maxReads 5000000 \
+         --filter_bases_not_stored \
+         -I possorted_bam.chrM.MAPQ40.rmdup.filtered.bam \
+         -targetIntervals possorted_bam.chrM.MAPQ40.rmdup.filtered.target.intervals \
+         -o possorted_bam.chrM.MAPQ40.rmdup.filtered.realign.bam >> "$log_file" 2>&1
+    
+    if [ ! -f "possorted_bam.chrM.MAPQ40.rmdup.filtered.realign.bam" ]; then
+        echo "ERROR: Failed to create realigned BAM for $species" | tee -a "$log_file"
+        return 1
+    fi
+    echo "Step 2 completed: $(date)" | tee -a "$log_file"
+    
+    echo "===== $(date) ===== Finished processing $species =====" | tee -a "$log_file"
+    echo "Realigned BAM file: $work_dir/possorted_bam.chrM.MAPQ40.rmdup.filtered.realign.bam" | tee -a "$log_file"
+    
+    return 0
+}
+
+for i in "${!SPECIES[@]}"; do
+    species="${SPECIES[$i]}"
+    ref_genome="${REF_GENOMES[$i]}"
+    
+    if [ ! -f "$ref_genome" ]; then
+        echo "ERROR: Reference genome not found for $species: $ref_genome"
+        echo "Please update the REF_GENOMES array with the correct path"
+        continue
+    fi
+    
+    bam_file="/PATH/TO/pbmc.mt/SNP/$species/mgatk.CleanBam/bam/possorted_bam.chrM.MAPQ40.rmdup.filtered.bam"
+    if [ ! -f "$bam_file" ]; then
+        echo "ERROR: Input BAM file not found for $species: $bam_file"
+        continue
+    fi
+    
+    start_time=$(date +%s)
+    echo "Starting processing for $species at $(date)"
+    REF_DICT="${ref_genome%.*}.dict"
+   if [ ! -f "$REF_DICT" ]; then
+    echo "Creating dictionary file: $REF_DICT"
+    samtools dict "$ref_genome" -o "$REF_DICT"
+	fi 
+    process_species "$species" "$ref_genome"
+    result=$?
+    
+    end_time=$(date +%s)
+    runtime=$((end_time - start_time))
+    
+    if [ $result -eq 0 ]; then
+        echo "Successfully processed $species in $runtime seconds"
+    else
+        echo "Failed to process $species after $runtime seconds. Check log: $work_dir/02_IndelRealigner.log"
+    fi
+done
+
+echo "All species processed!"

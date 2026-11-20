@@ -1,0 +1,61 @@
+#!/bin/bash
+
+#PBS -N Indel_CIGAR_Count_human
+#PBS -j oe
+#PBS -q batch
+#PBS -o Indel_CIGAR_Count.out
+#PBS -e Indel_CIGAR_Count.err
+#PBS -l nodes=1:ppn=1
+
+SAMPLES=( "PBMC_1" "PBMC_2" "CD34_1" "CD34_2" )
+
+BASE_IN="/PATH/TO/pbmc.mt/SNP/human/clean_bam/"
+
+count_indels() {
+    awk 'BEGIN {ins=0; del=0}
+    {
+      if($6 ~ /I/) ins += gsub(/[0-9]+I/,"",$6)
+      if($6 ~ /D/) del += gsub(/[0-9]+D/,"",$6)
+    }
+    END {
+      print "===== CIGAR STATISTICS ====="
+      print "Total Insertions:", ins
+      print "Total Deletions:", del
+      print "Total Indel Events:", ins + del
+      print "============================"
+    }'
+}
+
+for sample in "${SAMPLES[@]}"; do
+    echo "=== Processing ${sample} ==="
+    sample_dir="${BASE_IN}/${sample}"
+    mkdir -p "${sample_dir}"
+
+    log="${sample_dir}/02_Indel_CIGAR_count.log"
+    echo "Start: $(date)" > "${log}"
+    echo "Sample dir: ${sample_dir}" >> "${log}"
+
+    bam="${sample_dir}/possorted_bam.chrM.MAPQ40.rmdup.filtered.bam"
+    if [ ! -f "${bam}" ]; then
+        echo "ERROR: BAM not found: ${bam}" | tee -a "${log}"
+        continue
+    fi
+
+    echo "Counting indels from ${bam} ..." | tee -a "${log}"
+
+    samtools view -@ 1 "${bam}" 2>>"${log}" \
+        | count_indels \
+        | tee "${sample_dir}/Indel_CIGAR_count.txt" >> "${log}" 2>&1
+
+    if [ -f "${sample_dir}/Indel_CIGAR_count.txt" ]; then
+        echo "Saved Indel_CIGAR_count.txt to ${sample_dir}" | tee -a "${log}"
+    else
+        echo "ERROR: Failed to create Indel_CIGAR_count.txt for ${sample}" | tee -a "${log}"
+    fi
+
+    echo "Finished ${sample} at $(date)" >> "${log}"
+    echo
+done
+
+echo "All human samples processed (Indel CIGAR count)."
+

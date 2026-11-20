@@ -1,0 +1,28 @@
+#!/bin/bash
+#PBS -N atac_visual_v3
+#PBS -q batch
+#PBS -l nodes=cn1:ppn=8
+#PBS -l mem=32gb
+#PBS -l walltime=06:00:00
+#PBS -j oe
+#PBS -k oe
+#PBS -o /PATH/TO/pbmc.mt/celltype.anno/new_anno_ATAC/code/annotation_visual_revision/v3/logs/pbs.out
+set -euo pipefail
+export LD_LIBRARY_PATH=/opt/Anaconda/anaconda3/lib:${LD_LIBRARY_PATH:-}
+CODE="${MITOEVO_FIG1_CODE_ROOT:?Set MITOEVO_FIG1_CODE_ROOT}"
+OUT="${MITOEVO_FIG1_OUTPUT_ROOT:?Set MITOEVO_FIG1_OUTPUT_ROOT}"
+SOURCE="${MITOEVO_FIG1_PREVIOUS_OUTPUT_ROOT:?Set MITOEVO_FIG1_PREVIOUS_OUTPUT_ROOT}"
+mkdir -p "$OUT" "$CODE/logs"
+cd "$CODE"
+# Preserve all plots and quantitative tables for species without CD4/8 naive/memory labels.
+for sp in chicken cobra sturgeon stingray; do
+  cp -p "$SOURCE/$sp".* "$OUT/"
+done
+for sp in human mouse rat; do
+  echo "=== $sp ==="
+  Rscript --vanilla "$CODE/plot_umap_and_markers.R" "$sp" >"$CODE/logs/${sp}.log" 2>&1
+done
+Rscript --vanilla "$CODE/plot_umap_legend.R" >"$CODE/logs/legend.log" 2>&1
+pdfunite "$OUT/human.umap_numbered.pdf" "$OUT/mouse.umap_numbered.pdf" "$OUT/rat.umap_numbered.pdf" "$OUT/chicken.umap_numbered.pdf" "$OUT/cobra.umap_numbered.pdf" "$OUT/sturgeon.umap_numbered.pdf" "$OUT/stingray.umap_numbered.pdf" "$OUT/seven_species_umap_combined.pdf"
+pdfunite "$OUT/human.bubble.pdf" "$OUT/mouse.bubble.pdf" "$OUT/rat.bubble.pdf" "$OUT/chicken.bubble.pdf" "$OUT/cobra.bubble.pdf" "$OUT/sturgeon.bubble.pdf" "$OUT/stingray.bubble.pdf" "$OUT/seven_species_bubble_combined.pdf"
+echo 'Complete'

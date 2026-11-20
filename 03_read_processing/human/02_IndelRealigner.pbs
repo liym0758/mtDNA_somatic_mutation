@@ -1,0 +1,87 @@
+#!/bin/bash
+
+#PBS -N IndelRealigner_human
+#PBS -j oe
+#PBS -q batch
+#PBS -o IndelRealigner.out
+#PBS -e IndelRealigner.err
+#PBS -l nodes=1:ppn=32
+
+SAMPLES=( "PBMC_1" "PBMC_2" "CD34_1" "CD34_2" )
+
+BASE_DIR="/PATH/TO/pbmc.mt/SNP/human/clean_bam/"
+
+# Human reference genome (replace if you want another file)
+REF_GENOME="/PATH/TO/pbmc.mt/ref/human/mt.mask/Homo_Shapien_GRCh38/fasta/genome.fa"
+
+# GATK jar path (same as before)
+GATK_JAR="/PATH/TO/tools/GenomeAnalysisTK_3.5-0.jar"
+
+# sanity checks
+if [ ! -f "${REF_GENOME}" ]; then
+    echo "ERROR: Reference genome not found: ${REF_GENOME}"
+    exit 1
+fi
+if [ ! -f "${GATK_JAR}" ]; then
+    echo "ERROR: GATK jar not found: ${GATK_JAR}"
+    exit 1
+fi
+
+for sample in "${SAMPLES[@]}"; do
+    echo "=== Processing ${sample} ==="
+    sample_dir="${BASE_DIR}/${sample}"
+    mkdir -p "${sample_dir}"
+
+    log="${sample_dir}/02_IndelRealigner.log"
+    echo "Start: $(date)" > "${log}"
+    echo "Sample dir: ${sample_dir}" >> "${log}"
+    echo "Reference: ${REF_GENOME}" >> "${log}"
+
+    in_bam="${sample_dir}/possorted_bam.chrM.MAPQ40.rmdup.filtered.bam"
+    if [ ! -f "${in_bam}" ]; then
+        echo "ERROR: Input BAM not found: ${in_bam}" | tee -a "${log}"
+        continue
+    fi
+
+    # Step1: RealignerTargetCreator
+    intervals="${sample_dir}/possorted_bam.chrM.MAPQ40.rmdup.filtered.target.intervals"
+    echo "Running RealignerTargetCreator..." | tee -a "${log}"
+    java -Xmx8g -jar "${GATK_JAR}" \
+        -R "${REF_GENOME}" \
+        -T RealignerTargetCreator \
+        -nt 8 \
+        -I "${in_bam}" \
+        -o "${intervals}" >> "${log}" 2>&1
+
+    if [ ! -f "${intervals}" ]; then
+        echo "ERROR: Target intervals not created for ${sample}" | tee -a "${log}"
+        continue
+    fi
+
+    # Step2: IndelRealigner
+    out_bam="${sample_dir}/possorted_bam.chrM.MAPQ40.rmdup.filtered.realign.bam"
+    echo "Running IndelRealigner (output -> ${out_bam})" | tee -a "${log}"
+    java -Xmx48g -jar "${GATK_JAR}" \
+        -R "${REF_GENOME}" \
+        -T IndelRealigner \
+        -maxReads 5000000 \
+        --filter_bases_not_stored \
+        -I "${in_bam}" \
+        -targetIntervals "${intervals}" \
+        -o "${out_bam}" >> "${log}" 2>&1
+
+    if [ -f "${out_bam}" ]; then
+        echo "IndelRealigner finished for ${sample}, output: ${out_bam}" | tee -a "${log}"
+        if command -v samtools >/dev/null 2>&1; then
+            samtools index "${out_bam}" >> "${log}" 2>&1 || true
+        fi
+    else
+        echo "ERROR: IndelRealigner failed for ${sample}" | tee -a "${log}"
+    fi
+
+    echo "Finished ${sample} at $(date)" >> "${log}"
+    echo
+done
+
+echo "All human samples processed by IndelRealigner."
+
