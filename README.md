@@ -2,7 +2,7 @@
 Somatic mtDNA Mutations and Selection across Vertebrate Peripheral Blood Mononuclear Cells
 ## Analysis order
 
-| Stage | Code | Main output |
+| Step | Code | Main output |
 | --- | --- | --- |
 | 1. Prepare reference and NUMT mask | `scripts/01_reference/example_reference.sh`, `numt_simulation/` | Masked reference and NUMT candidates |
 | 2. scATAC analysis | `scripts/02_scatac/example_cellranger_atac.sh`, `example_signac_qc_clustering.R`, `example_rna_atac_label_transfer.R` | Cell Ranger BAM and annotated cells |
