@@ -1,0 +1,19 @@
+name: mitoevo-mgatk
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - python=3.10.13
+  - pip
+  - pip:
+      - mgatk==0.7.0
+      - biopython==1.85
+      - click==8.1.8
+      - numpy==2.2.4
+      - optparse-pretty==0.1.1
+      - pandas==2.2.3
+      - pysam==0.23.0
+      - pytest==8.3.5
+      - regex==2024.11.6
+      - ruamel.yaml==0.17.21
+      - snakemake==7.32.4
